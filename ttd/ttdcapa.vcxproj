@@ -1,0 +1,53 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<!-- ttdcapa.dll: the same three analysis passes as the command-line tool, behind the C ABI
+     in include\ttdcapa.h, for host programs that want to embed the extractor instead of
+     shelling out to ttdcapa-extract.exe. Produces ttdcapa.dll + ttdcapa.lib (import library)
+     in bin\$(Platform)\$(Configuration)\. -->
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <ProjectGuid>{4C1F0B2E-7A63-4D8E-9F52-3B0C6D71A902}</ProjectGuid>
+    <RootNamespace>ttdcapa</RootNamespace>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)'=='Debug'" Label="Configuration">
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v145</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)'=='Release'" Label="Configuration">
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v145</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <Import Project="ttdcapa-common.props" />
+  <Import Project="packages\Microsoft.TimeTravelDebugging.Apis.$(TTDApiVersion)\build\native\Microsoft.TimeTravelDebugging.Apis.props" Condition="Exists('packages\Microsoft.TimeTravelDebugging.Apis.$(TTDApiVersion)\build\native\Microsoft.TimeTravelDebugging.Apis.props')" />
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <!-- TTDCAPA_EXPORTS turns the TTDCAPA_API declarations in ttdcapa.h into exports; a
+           consumer that does not define it gets the __declspec(dllimport) side. -->
+      <PreprocessorDefinitions>TTDCAPA_EXPORTS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClCompile Include="src\api\ttdcapa_api.cpp" />
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <Import Project="ttdcapa-common.targets" />
+</Project>

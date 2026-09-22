@@ -1,0 +1,12 @@
+[submodule "win32json"]
+	path = win32json
+	url = https://github.com/marlersoft/win32json
+[submodule "capa-cpp"]
+	path = capa-cpp
+	url = https://github.com/HullaBrian/capa-cpp
+[submodule "rules"]
+	path = rules
+	url = https://github.com/mandiant/capa-rules.git
+[submodule "phnt"]
+	path = phnt
+	url = https://github.com/winsiderss/phnt.git

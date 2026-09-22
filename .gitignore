@@ -1,0 +1,47 @@
+ReplayAPI.md
+*timeline.txt
+
+# ---- C++ extractor build artifacts (Visual Studio / MSBuild) ----
+ttd/.vs/
+ttd/x64/
+ttd/ttdcapa-extract/
+# both projects write here: obj/ intermediates, bin/ the exe, the DLL and its import library
+ttd/obj/
+ttd/bin/
+ttd/**/*.exp
+ttd/**/*.obj
+ttd/**/*.pdb
+ttd/**/*.ilk
+ttd/**/*.idb
+ttd/**/*.ipdb
+ttd/**/*.iobj
+ttd/**/*.tlog
+ttd/**/*.log
+ttd/**/*.recipe
+ttd/*.vcxproj.user
+
+# Restored NuGet package (re-restored on build from packages.config)
+ttd/packages/
+
+# ---- deployment / scratch ----
+# build/ holds the deployed exe + TTD runtime DLLs; ignore generated outputs only
+build/*.json
+build/*.log
+build/*.run
+build/*.idx
+
+# ---- TTD traces (large; keep out of VCS) ----
+*.run
+*.idx
+
+# ---- generated TTD reports ----
+*.ttd.json
+
+# ---- Python ----
+__pycache__/
+*.pyc
+.venv/
+
+# keep the small schema fixture used by the extractor parity dump
+!tests/sample.ttd.json
+*.dll

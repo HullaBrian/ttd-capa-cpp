@@ -1,0 +1,51 @@
+{
+  "version": 1,
+  "trace": { "path": "sample.run", "arch": "x64", "os": "windows" },
+  "sample": {
+    "md5": "5d41402abc4b2a76b9719d911017c592",
+    "sha1": "aaf4c61ddcc5e8a2dabede0f3b482cd9aea9434d",
+    "sha256": "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+    "name": "sample.exe"
+  },
+  "file": {
+    "imports": [
+      { "dll": "kernel32.dll", "name": "CreateFileA", "va": 5368713264 },
+      { "dll": "kernel32.dll", "name": "VirtualAlloc", "va": 5368713280 }
+    ],
+    "exports": [
+      { "name": "Start", "va": 5368713984 }
+    ],
+    "sections": [
+      { "name": ".text", "va": 5368713216 }
+    ],
+    "strings": [ "this program cannot be run in dos mode" ]
+  },
+  "processes": [
+    {
+      "pid": 1234,
+      "ppid": 500,
+      "name": "sample.exe",
+      "environ": [ "PATH=C:\\Windows\\System32" ],
+      "threads": [ 100, 101 ],
+      "calls": [
+        {
+          "tid": 100,
+          "seq": 10,
+          "position": "1A:4F",
+          "module": "kernel32",
+          "api": "CreateFileA",
+          "args": [ "C:\\temp\\out.bin", 1073741824 ],
+          "ret": 224
+        },
+        {
+          "tid": 100,
+          "seq": 20,
+          "module": "kernel32",
+          "api": "VirtualAlloc",
+          "args": [ 0, 4096, 12288, 64 ],
+          "ret": 6291456
+        }
+      ]
+    }
+  ]
+}

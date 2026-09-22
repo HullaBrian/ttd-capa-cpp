@@ -1,0 +1,45 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Package checks and deployment steps shared by ttdcapa-extract.vcxproj and ttdcapa.vcxproj.
+  Imported after Microsoft.Cpp.targets, which is where the NuGet .targets files have to land.
+-->
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <!-- Fail early with a helpful message if NuGet packages were not restored. -->
+  <Target Name="EnsureTTDPackage" BeforeTargets="PrepareForBuild">
+    <Error Condition="!Exists('$(MSBuildThisFileDirectory)packages\Microsoft.TimeTravelDebugging.Apis.$(TTDApiVersion)\build\native\Microsoft.TimeTravelDebugging.Apis.props')" Text="Missing Microsoft.TimeTravelDebugging.Apis $(TTDApiVersion). Run 'nuget restore' (or restore packages in Visual Studio) before building." />
+  </Target>
+
+  <!-- Deploy the runtime DLLs next to the build output. Get them from a WinDbg install
+       (or the TTD SDK's Get-Ttd.ps1), then point TTDRuntimeDir at the platform folder, or
+       drop the DLLs into packages\...\build\native\bin\x64\ so this copy picks them up.
+       See the README's build section. -->
+  <PropertyGroup>
+    <TTDRuntimeDir Condition="'$(TTDRuntimeDir)'==''">$(MSBuildThisFileDirectory)packages\Microsoft.TimeTravelDebugging.Apis.$(TTDApiVersion)\build\native\bin\x64</TTDRuntimeDir>
+  </PropertyGroup>
+  <Target Name="CopyTTDRuntime" AfterTargets="Build">
+    <ItemGroup>
+      <TTDRuntime Include="$(TTDRuntimeDir)\TTDReplay.dll;$(TTDRuntimeDir)\TTDReplayCPU.dll" />
+    </ItemGroup>
+    <Copy SourceFiles="@(TTDRuntime)" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" Condition="'@(TTDRuntime)'!=''" ContinueOnError="true" />
+  </Target>
+
+  <!-- The API metadata indexes the argument decoder reads at startup. win32-index.bin
+       covers the documented Win32 surface (regenerate with tools\build-win32-index.py
+       after bumping the win32json submodule); phnt-index.bin covers the native one
+       (tools\build-phnt-index.py, after bumping phnt) and is merged under it. The
+       extractor still runs heuristically if either is absent. -->
+  <Target Name="CopyApiIndexes" AfterTargets="Build">
+    <Copy SourceFiles="$(MSBuildThisFileDirectory)data\win32-index.bin" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" Condition="Exists('$(MSBuildThisFileDirectory)data\win32-index.bin')" />
+    <Copy SourceFiles="$(MSBuildThisFileDirectory)data\phnt-index.bin" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" Condition="Exists('$(MSBuildThisFileDirectory)data\phnt-index.bin')" />
+    <Warning Condition="!Exists('$(MSBuildThisFileDirectory)data\win32-index.bin')" Text="data\win32-index.bin is missing; run 'python tools\build-win32-index.py' to enable metadata-driven argument decoding." />
+    <Warning Condition="!Exists('$(MSBuildThisFileDirectory)data\phnt-index.bin')" Text="data\phnt-index.bin is missing; run 'python tools\build-phnt-index.py' to decode native (ntdll) calls too." />
+  </Target>
+
+  <Import Project="$(MSBuildThisFileDirectory)packages\nlohmann.json.3.12.0\build\native\nlohmann.json.targets" Condition="Exists('$(MSBuildThisFileDirectory)packages\nlohmann.json.3.12.0\build\native\nlohmann.json.targets')" />
+  <Target Name="EnsureNuGetPackageBuildImports" BeforeTargets="PrepareForBuild">
+    <PropertyGroup>
+      <ErrorText>This project references NuGet package(s) that are missing on this computer. Use NuGet Package Restore to download them.  For more information, see http://go.microsoft.com/fwlink/?LinkID=322105. The missing file is {0}.</ErrorText>
+    </PropertyGroup>
+    <Error Condition="!Exists('$(MSBuildThisFileDirectory)packages\nlohmann.json.3.12.0\build\native\nlohmann.json.targets')" Text="$([System.String]::Format('$(ErrorText)', 'packages\nlohmann.json.3.12.0\build\native\nlohmann.json.targets'))" />
+  </Target>
+</Project>

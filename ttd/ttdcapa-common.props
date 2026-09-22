@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Settings and sources shared by both outputs of this directory:
+
+    ttdcapa-extract.vcxproj  the command-line tool (adds src\main.cpp)
+    ttdcapa.vcxproj          the embeddable DLL     (adds src\api\ttdcapa_api.cpp)
+
+  Everything below main.cpp / the API shim is identical between them, so it lives here
+  rather than being kept in step by hand in two project files.
+-->
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <VCProjectVersion>17.0</VCProjectVersion>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+    <!-- Must match the installed Microsoft.TimeTravelDebugging.Apis NuGet version. -->
+    <TTDApiVersion>0.9.5</TTDApiVersion>
+    <!-- Reported by ttdcapa_version_string(). -->
+    <TtdCapaVersion>0.3.0</TtdCapaVersion>
+    <!-- Keep build artifacts tidy and out of the source tree:
+           obj\<Project>\<Platform>\<Config>\  intermediate files (.obj, .tlog, .ilk, compiler .pdb)
+           bin\<Platform>\<Config>\            final outputs (.exe, .dll, .lib, linker .pdb, TTD DLLs)
+         Anchored to this directory so the layout is the same no matter where MSBuild or
+         Visual Studio is invoked from. -->
+    <OutDir>$(MSBuildThisFileDirectory)bin\$(Platform)\$(Configuration)\</OutDir>
+    <IntDir>$(MSBuildThisFileDirectory)obj\$(MSBuildProjectName)\$(Platform)\$(Configuration)\</IntDir>
+  </PropertyGroup>
+
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <LanguageStandard>stdcpp20</LanguageStandard>
+      <WarningLevel>Level3</WarningLevel>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>WIN32_LEAN_AND_MEAN;NOMINMAX;_CRT_SECURE_NO_WARNINGS;TTDCAPA_VERSION="$(TtdCapaVersion)";%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <!-- Mirror the source tree under IntDir so files that share a base name across
+           subdirectories (e.g. src\utils.cpp and src\codescan\Utils.cpp) don't collide
+           on the same flat .obj on case-insensitive Windows. -->
+      <ObjectFileName>$(IntDir)%(RelativeDir)</ObjectFileName>
+    </ClCompile>
+    <Link>
+      <AdditionalDependencies>TTDReplay.lib;bcrypt.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+
+  <ItemDefinitionGroup Condition="'$(Configuration)'=='Release'">
+    <ClCompile>
+      <Optimization>MaxSpeed</Optimization>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+    </ClCompile>
+    <Link>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+    </Link>
+  </ItemDefinitionGroup>
+
+  <!-- The analysis itself: the call sweep, the Win32 metadata decoder, and the code-scan
+       subsystem. Neither a front end nor an entry point is in here. -->
+  <ItemGroup>
+    <ClCompile Include="src\abi.cpp" />
+    <ClCompile Include="src\extract.cpp" />
+    <ClCompile Include="src\log.cpp" />
+    <ClCompile Include="src\builtinsigs.cpp" />
+    <ClCompile Include="src\ttd_pe_utils.cpp" />
+    <ClCompile Include="src\ttdutils.cpp" />
+    <ClCompile Include="src\utils.cpp" />
+    <ClCompile Include="src\win32meta.cpp" />
+    <ClCompile Include="src\codescan\CallCapturer.cpp" />
+    <ClCompile Include="src\codescan\CodeHits.cpp" />
+    <ClCompile Include="src\codescan\CodeScan.cpp" />
+    <ClCompile Include="src\codescan\DiscoveryPass.cpp" />
+    <ClCompile Include="src\codescan\OutParams.cpp" />
+    <ClCompile Include="src\codescan\Region.cpp" />
+    <ClCompile Include="src\codescan\RegionProviders.cpp" />
+    <ClCompile Include="src\codescan\ShadowReconstructor.cpp" />
+    <ClCompile Include="src\codescan\SymbolResolver.cpp" />
+    <ClCompile Include="src\codescan\TraceSession.cpp" />
+    <ClCompile Include="src\codescan\Utils.cpp" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ClInclude Include="include\ttdcapa.h" />
+    <ClInclude Include="src\abi.hpp" />
+    <ClInclude Include="src\extract.hpp" />
+    <ClInclude Include="src\log.hpp" />
+    <ClInclude Include="src\builtinsigs.hpp" />
+    <ClInclude Include="src\status.hpp" />
+    <ClInclude Include="src\ttd_pe_utils.hpp" />
+    <ClInclude Include="src\ttdutils.hpp" />
+    <ClInclude Include="src\utils.hpp" />
+    <ClInclude Include="src\win32meta.hpp" />
+    <ClInclude Include="src\codescan\CallCapturer.hpp" />
+    <ClInclude Include="src\codescan\CodeHits.hpp" />
+    <ClInclude Include="src\codescan\CodeScan.hpp" />
+    <ClInclude Include="src\codescan\DiscoveryPass.hpp" />
+    <ClInclude Include="src\codescan\OutParams.hpp" />
+    <ClInclude Include="src\codescan\Region.hpp" />
+    <ClInclude Include="src\codescan\RegionProviders.hpp" />
+    <ClInclude Include="src\codescan\ShadowReconstructor.hpp" />
+    <ClInclude Include="src\codescan\SymbolResolver.hpp" />
+    <ClInclude Include="src\codescan\TraceSession.hpp" />
+    <ClInclude Include="src\codescan\Utils.hpp" />
+    <ClInclude Include="src\codescan\WriteLog.hpp" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="packages.config" />
+  </ItemGroup>
+</Project>

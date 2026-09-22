@@ -1,0 +1,149 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<!-- Solution Explorer grouping only. The shared sources come from
+     ttdcapa-common.props, so their paths are spelled the same way here. -->
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <ClCompile Include="src\abi.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\extract.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\log.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\ttd_pe_utils.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\ttdutils.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\utils.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\win32meta.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\codescan\CallCapturer.cpp">
+      <Filter>Source Files\codescan</Filter>
+    </ClCompile>
+    <ClCompile Include="src\codescan\CodeHits.cpp">
+      <Filter>Source Files\codescan</Filter>
+    </ClCompile>
+    <ClCompile Include="src\codescan\CodeScan.cpp">
+      <Filter>Source Files\codescan</Filter>
+    </ClCompile>
+    <ClCompile Include="src\codescan\DiscoveryPass.cpp">
+      <Filter>Source Files\codescan</Filter>
+    </ClCompile>
+    <ClCompile Include="src\codescan\OutParams.cpp">
+      <Filter>Source Files\codescan</Filter>
+    </ClCompile>
+    <ClCompile Include="src\codescan\Region.cpp">
+      <Filter>Source Files\codescan</Filter>
+    </ClCompile>
+    <ClCompile Include="src\codescan\RegionProviders.cpp">
+      <Filter>Source Files\codescan</Filter>
+    </ClCompile>
+    <ClCompile Include="src\codescan\ShadowReconstructor.cpp">
+      <Filter>Source Files\codescan</Filter>
+    </ClCompile>
+    <ClCompile Include="src\codescan\SymbolResolver.cpp">
+      <Filter>Source Files\codescan</Filter>
+    </ClCompile>
+    <ClCompile Include="src\codescan\TraceSession.cpp">
+      <Filter>Source Files\codescan</Filter>
+    </ClCompile>
+    <ClCompile Include="src\codescan\Utils.cpp">
+      <Filter>Source Files\codescan</Filter>
+    </ClCompile>
+    <ClCompile Include="src\main.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="include\ttdcapa.h">
+      <Filter>Header Files\public</Filter>
+    </ClInclude>
+    <ClInclude Include="src\abi.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\extract.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\log.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\status.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\ttd_pe_utils.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\ttdutils.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\utils.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\win32meta.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\codescan\CallCapturer.hpp">
+      <Filter>Header Files\codescan</Filter>
+    </ClInclude>
+    <ClInclude Include="src\codescan\CodeHits.hpp">
+      <Filter>Header Files\codescan</Filter>
+    </ClInclude>
+    <ClInclude Include="src\codescan\CodeScan.hpp">
+      <Filter>Header Files\codescan</Filter>
+    </ClInclude>
+    <ClInclude Include="src\codescan\DiscoveryPass.hpp">
+      <Filter>Header Files\codescan</Filter>
+    </ClInclude>
+    <ClInclude Include="src\codescan\OutParams.hpp">
+      <Filter>Header Files\codescan</Filter>
+    </ClInclude>
+    <ClInclude Include="src\codescan\Region.hpp">
+      <Filter>Header Files\codescan</Filter>
+    </ClInclude>
+    <ClInclude Include="src\codescan\RegionProviders.hpp">
+      <Filter>Header Files\codescan</Filter>
+    </ClInclude>
+    <ClInclude Include="src\codescan\ShadowReconstructor.hpp">
+      <Filter>Header Files\codescan</Filter>
+    </ClInclude>
+    <ClInclude Include="src\codescan\SymbolResolver.hpp">
+      <Filter>Header Files\codescan</Filter>
+    </ClInclude>
+    <ClInclude Include="src\codescan\TraceSession.hpp">
+      <Filter>Header Files\codescan</Filter>
+    </ClInclude>
+    <ClInclude Include="src\codescan\Utils.hpp">
+      <Filter>Header Files\codescan</Filter>
+    </ClInclude>
+    <ClInclude Include="src\codescan\WriteLog.hpp">
+      <Filter>Header Files\codescan</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="packages.config" />
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="Header Files">
+      <UniqueIdentifier>{6d7fdba1-6b00-4dfd-8397-e9ca5095ebf3}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\codescan">
+      <UniqueIdentifier>{3c9a5d42-0b1f-4e8d-9c2b-4a6f7d8e9f01}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\public">
+      <UniqueIdentifier>{6f1c7a64-2d3e-4a0f-be4d-6c8a9f0b1c23}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files">
+      <UniqueIdentifier>{4aad2756-22c0-425c-8822-ea08c596e11b}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\codescan">
+      <UniqueIdentifier>{2b8f4c31-9a0e-4d7c-8b1a-3f5e6c7d8e90}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>
