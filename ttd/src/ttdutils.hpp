@@ -97,6 +97,14 @@ namespace ttdcapa {
         std::string return_position;
         std::wstring module;         // resolved owning module, e.g. "kernel32" (no extension)
         std::string api;             // resolved export name, e.g. "CreateFileA"
+        // Where the call instruction landed, when that was not the export itself -- a stub, a
+        // hooked export table's thunk, the CFG dispatcher -- and the export was reached from
+        // there by a jump; 0 for a direct call. `position` is still the call instruction's.
+        uint64_t via = 0;
+        // The call went through a function pointer and landed on an export that only returns.
+        // The linker shares such code between every function with the same body, exported or
+        // not, so `api` may not be the function the caller meant.
+        bool ambiguous = false;
         std::vector<ArgValue> args;      // flat view consumed by capa (ints and strings)
         std::vector<DecodedArg> params;  // rich view; only meaningful when `metadata` is set
         bool metadata = false;           // args came from a real signature, not the heuristic

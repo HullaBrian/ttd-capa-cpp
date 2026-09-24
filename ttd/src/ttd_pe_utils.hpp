@@ -42,6 +42,12 @@ namespace ttdcapa {
 	bool getModuleExports(TTD::Replay::UniqueCursor* cursor, TTD::GuestAddress moduleBaseAddress,
 		std::vector<std::pair<uint64_t, std::string>>& out, bool* is64Bit = nullptr);
 
+	// The end of the function that starts at `entry`, from the image's x64 function table
+	// (.pdata): the one place a PE records how long a function is. Only the primary chunk --
+	// a function split into cold chunks ends where its first chunk does. Returns false for a
+	// 32-bit image, which has no such table, and for an `entry` the table does not list.
+	bool getFunctionEnd(TTD::Replay::UniqueCursor* cursor, TTD::GuestAddress moduleBaseAddress, uint64_t entry, uint64_t& end);
+
 	// Parse the import directory of the PE image mapped at `base`.
 	bool getModuleImports(TTD::Replay::UniqueCursor* cursor, TTD::GuestAddress moduleBaseAddress, std::vector<ImportRecord>& out);
 

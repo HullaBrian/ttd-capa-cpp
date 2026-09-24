@@ -1,14 +1,14 @@
 > [!Warning]
-> This project was generated using Claude. I performed testing for my own use cases,
-> but you may run into issues. If you do, feel free to open an issue on this repository!
+> This project was entirely generated using Claude. I performed testing for my own use cases, but
+> you may run into issues. If you do, feel free to open an issue on this repository!
 
 # Overview
 
 ttd-capa is a [capa](https://github.com/mandiant/capa) compatible capability extractor for Time
 Travel Debugging (TTD) traces. A TTD trace records the complete execution of a process, so it
-exposes behavior that a static scan of the file on disk can't see. This particular implementation 
-of ttd-capa leverages a custom-built capa rewrite in C++ which has proven to be several times 
-more performant than the official Python version.
+exposes behavior that a static scan of the file on disk can't see. Rule matching uses capa-cpp (the
+`capa-cpp/` submodule), a C++ rewrite of capa that runs several times faster than the official
+Python version.
 
 ![](assets/ttd-capa-comparison.png)
 
@@ -26,39 +26,43 @@ so capabilities that exist only after unpacking are recovered (right).
 3. Match that report against the capa rules with `capa-cpp`, which surfaces the capabilities
 
 The extractor is built on Microsoft's TTD C++ SDK and
-[nlohmann/json](https://github.com/nlohmann/json). It starts from the trace's module load events,
-which tell it the address of every exported function along with its name and owning module. It
-then replays the trace from start to finish, and every call that lands on one of those addresses
-is written down: the module, the function, its arguments, its return value, and the position in
-the trace where it happened.
+[nlohmann/json](https://github.com/nlohmann/json). The trace's module load events give the address,
+name and owning module of every exported function. The extractor replays the trace with an execute
+watchpoint on each of those addresses and records a call when a thread enters an export right after
+a `call`, with that call's return address on top of the stack. Each record holds the module, the
+function, the arguments, the return value and the trace position of the `call` instruction.
 
-Instead of a brute force approach, function arguments are decoded from API metadata. Two binary indexes 
-ship with the extractor. One is built from [win32json](https://github.com/marlersoft/win32json) (Microsoft's 
-Win32 metadata) and one from [phnt](https://github.com/winsiderss/phnt) (native API headers). Between
-them they supply each call's parameter count and types, so flags and enums print by name and
-`[Out]` parameters are read back once the callee has filled them in. A call with no signature
-falls back to a heuristic: the four argument registers on x64, or the first four stack words on
-x86. Those calls are marked `signature: false`.
+Recording at the export also catches calls that reach an API through a jump: the Control Flow Guard
+dispatcher that CFG-compiled system DLLs use for function pointers, a stub, or an export table
+redirected to a sample's own thunks. These calls carry a `via` field with the address the `call`
+landed on. The return-address check rejects code that only jumps to an export, such as a
+return-address-spoofing gadget. Thread starts are not recorded: the call from
+`BaseThreadInitThunk` to a start routine is Windows starting the thread, even when the start
+address is an export.
 
-String arguments need one more step. A replay only sees the memory the calling thread has already
-touched, so a string the caller prepared earlier reads back as nothing and leaves a bare pointer
-in the report. Most are picked up when the call returns, by which point the callee has usually
-read the string itself. Recovering the few still missing means seeking back to each call and
-reading again, which costs more than the rest of the extraction put together, so it is off unless
-`--recover-strings` asks for it.
+A call that arrives through a jump at an export that only returns (`ret`, or `xor eax,eax; ret`)
+is marked `ambiguous`. The linker folds identical functions into one copy, so that address is
+usually shared with functions that are not exported, and the export's name may be wrong.
 
-Watching calls doesn't say anything about code the program executes at runtime, which is where a packer or
-loader puts the interesting part. `--scan-code` adds a second pass for that. It replays the trace
-watching for memory that gets allocated, mapped, or made executable and then run. It then rebuilds
-each such region's contents as they stood when code in it ran - one `.bin` snapshot per
-generation - so a multi-stage loader yields one per stage. capa-cpp then runs its ordinary static
-analysis over those snapshots, seeded with the instruction addresses the trace proves were
-executed, so the disassembly starts from real entry points rather than guesses. A third pass can then 
-replay the trace another time with execute watchpoints on the matched addresses. This provides a 
-reconstructed timeline of when detected code capabilities were executed.
+Arguments are decoded from API metadata. Two binary indexes ship with the extractor, one built from
+[win32json](https://github.com/marlersoft/win32json) (Microsoft's Win32 metadata) and one from
+[phnt](https://github.com/winsiderss/phnt) (native API headers). They supply each call's parameter
+count and types, so flags and enums print by name and `[Out]` parameters are read after the callee
+fills them in. A call with no signature falls back to a heuristic: the four argument registers on
+x64, or the first four stack words on x86. Those calls are marked `signature: false`.
 
-Rule matching is left to capa-cpp, a C++ reimplementation of capa's dynamic and static analysis
-paths, vendored as the `capa-cpp/` submodule.
+A replay only sees memory the calling thread has already touched, so a string prepared earlier can
+read back as nothing. Most such strings are read again when the call returns, after the callee has
+touched them. Recovering the rest means seeking back to each call, which costs more than the rest
+of the extraction, so it only runs with `--recover-strings`.
+
+Code the program creates at runtime, where a packer or loader keeps the interesting part, makes no
+API calls to watch. `--scan-code` adds a pass for it. The pass watches for memory that is
+allocated, mapped or made executable and then run, and rebuilds each region's contents as they
+stood when its code ran, one `.bin` snapshot per generation, so a multi-stage loader yields one
+snapshot per stage. capa-cpp runs its static analysis over the snapshots, starting disassembly from
+the instruction addresses the trace shows were executed. A further replay with execute watchpoints
+on the matched addresses places each code capability at the moment it ran.
 
 # Prerequisites
 
@@ -78,12 +82,10 @@ cd ttd-capa
 git submodule update --init
 ```
 
-They supply `win32json` and `phnt` (API metadata for argument decoding), `capa-cpp` (the matcher),
-and `rules` (capa rule collection)
+They supply `win32json` and `phnt` (API metadata for argument decoding), `capa-cpp` (the matcher)
+and `rules` (the capa rule collection).
 
-Use `--init` rather than `--init --recursive` or `git clone --recursive`. capa-cpp carries its own
-submodule for the IDA SDK, which only its IDA plugin needs. Using `--recursive` pulls that too, and 
-nothing in this project uses it.
+Avoid `--recursive`: it also pulls capa-cpp's IDA SDK submodule, which only its IDA plugin uses.
 
 ## ttd-capa
 
@@ -121,7 +123,7 @@ build at a copy:
 MSBuild ttd\ttdcapa-extract.vcxproj -p:Configuration=Release -p:Platform=x64 -p:TTDRuntimeDir=<dir>
 ```
 
-Copying both DLLs next to `ttdcapa-extract.exe` by hand works too. A WinDbg installation is 
+Copying both DLLs next to `ttdcapa-extract.exe` by hand works too. A WinDbg installation is
 one place to get them:
 
 ```powershell
@@ -141,11 +143,9 @@ MSBuild capa-cpp\capa-cpp.vcxproj -p:Configuration=Release -p:Platform=x64
 # (or ./build.sh Release from Git Bash)
 ```
 
-This produces a self-contained `capa-cpp.exe`, which the wrapper scripts locate automatically. The
-scripts search every layout the submodule has used and take the most recently written executable,
-so a stale binary from an older build does not win over a fresh one. A copy placed next to the
-scripts wins outright, and `--capa-cpp <path>` pins one explicitly. See `capa-cpp/README.md` for
-more.
+This produces a self-contained `capa-cpp.exe`. The wrapper scripts find the most recently built
+copy on their own; a copy next to the scripts takes precedence, and `--capa-cpp <path>` names one
+explicitly. See `capa-cpp/README.md` for more.
 
 # Usage
 
@@ -157,9 +157,9 @@ more.
 python ttd-capa.py <trace.run> <rules-dir> [--sample sample.exe] [-- <capa-cpp args>]
 ```
 
-By default the TTD report goes to a temp file that is deleted after the match. To keep it for 
-other tool options (i.e. the timeline script) use `--json-output <path>` to write it somewhere you 
-choose, or `--keep-json` to leave the temp file in place. Either way the path is printed to stderr.
+By default the TTD report goes to a temp file that is deleted after the match. To keep it for other
+tools, such as the timeline script, pass `--json-output <path>`, or `--keep-json` to leave the temp
+file in place. Either way the path is printed to stderr.
 
 ```powershell
 python ttd-capa.py <trace.run> <rules-dir> --json-output report.ttd.json
@@ -174,22 +174,20 @@ python ttd-capa.py <trace.run> <rules-dir> --sample sample.exe -- -vv
 
 Common flags:
 
-- `--sample <path>` - the on-disk sample, for accurate hashes in the report
-- `--extractor <path>` / `--capa-cpp <path>` - override automatic searching for the capa-cpp binary
-- `--json-output <path>` - write the TTD report to a known path and keep it
-- `--keep-json` - keep the report in a temp file (path printed to stderr)
-- `--max-calls N` - cap recorded calls (for very large traces)
-- `--max-buffer N` - bytes kept from any one captured buffer (default 256)
-- `--no-metadata` - disable metadata-driven decoding and use the heuristic capture everywhere
-- `--recover-strings` - spend most of the run time (2.2s to 6.7s on a 75 MB trace) to decode a
-  further ~1% of string arguments. Worth it when a rule hinges on a string the default run leaves
-  as a pointer; see [docs/ARGUMENT-DECODING.md](docs/ARGUMENT-DECODING.md)
-- `--with-stack-args` - for calls with no metadata only, read four more stack slots than the
-  heuristic normally would
-- `--win32-index <path>` - use a specific `win32-index.bin`
-- `--rebuild-index` - delete an unloadable `.idx` and build a fresh one. Pass this if a run is
-  unexpectedly slow: the TTD SDK will not replace a stale index unless asked, and without one the
-  trace replays unindexed
+- `--sample <path>`: the on-disk sample, for accurate hashes in the report
+- `--extractor <path>` / `--capa-cpp <path>`: use these binaries instead of searching for them
+- `--json-output <path>`: write the TTD report to a known path and keep it
+- `--keep-json`: keep the report in a temp file (path printed to stderr)
+- `--max-calls N`: cap recorded calls, for very large traces
+- `--max-buffer N`: bytes kept from any one captured buffer (default 256)
+- `--no-metadata`: use the heuristic capture for every call
+- `--recover-strings`: decode about 1% more string arguments at roughly three times the run time
+  (2.2s to 6.7s on a 75 MB trace). Useful when a rule depends on a string left as a pointer; see
+  [docs/ARGUMENT-DECODING.md](docs/ARGUMENT-DECODING.md)
+- `--with-stack-args`: for calls with no metadata, read four more stack slots
+- `--win32-index <path>`: use a specific `win32-index.bin`
+- `--rebuild-index`: delete an unloadable `.idx` and build a fresh one. Try this when a run is
+  unexpectedly slow: the TTD SDK does not replace a stale index on its own, and replays unindexed
 
 ## Manual
 
@@ -216,14 +214,14 @@ python ttd-capa.py <trace.run> <rules-dir> --code-only --keep-dumps
 
 Flags:
 
-- `--code-only` - skip the dynamic call report
-- `--max-code-scans N` - cap snapshots reconstructed per region (default 8; 0 = unlimited)
-- `--scan-data` - also reconstruct and scan non-executable regions
-- `--no-scan-modules` - do not watch the sample's own module images
-- `--keep-dumps` - keep the reconstructed `.bin` snapshots
-- `--code-output <path>` - write the static capability records as JSON, for `ttd-timeline.py --code`
-- `--code-hits-output <path>` - also record where each matched code site executed
-- `--max-region-bytes N` / `--max-write-log-bytes N` - memory budgets (defaults 256 MiB per region,
+- `--code-only`: skip the dynamic call report
+- `--max-code-scans N`: cap snapshots reconstructed per region (default 8; 0 = unlimited)
+- `--scan-data`: also reconstruct and scan non-executable regions
+- `--no-scan-modules`: do not watch the sample's own module images
+- `--keep-dumps`: keep the reconstructed `.bin` snapshots
+- `--code-output <path>`: write the static capability records as JSON, for `ttd-timeline.py --code`
+- `--code-hits-output <path>`: also record where each matched code site executed
+- `--max-region-bytes N` / `--max-write-log-bytes N`: memory budgets (defaults 256 MiB per region,
   1 GiB across all regions). Anything over budget is skipped with a diagnostic
 
 The two views are complementary. The dynamic pass owns API-name features, which a reconstructed
@@ -263,9 +261,8 @@ python ttd-report.py <report.ttd.json> -r <rules-dir> --code code-caps.json
 ## Timeline
 
 Because the report carries TTD positions, `ttd-timeline.py` can show capabilities in the order
-they were used, along with the call that triggered each one. Four rows below, out of the 2,684 a
-75 MB beacon trace produces, with the skipped stretches marked and the two name columns narrowed
-to fit this page -- the tool sizes those to the widest row in the whole table:
+they were used, with the call that triggered each one. Below are four of the 2,684 rows a 75 MB
+beacon trace produces, with the name columns narrowed to fit this page:
 
 ```
 TTD POS    TID  CAPABILITY                            NAMESPACE                  TRIGGERING CALL
@@ -280,7 +277,7 @@ TTD POS    TID  CAPABILITY                            NAMESPACE                 
 
 Parameters are named, `->` shows a pointer's pointee, `@ret` marks an `[Out]` value read after the
 callee filled it in, and enums render by name. `lpszServerName` above is the beacon's C2 address,
-which is one of the strings the recovery described earlier brings back.
+one of the strings read at the call's return.
 
 The timeline takes either a TTD report or a `.run` trace:
 
@@ -298,21 +295,13 @@ python ttd-timeline.py report.ttd.json --calls
 Produce the report with `ttd-capa.py --json-output report.ttd.json`, or run the extractor
 directly with `-o`.
 
-Reconstructed-code capabilities fold into the same timeline, with the triggering column pointing
-at the region (`code@0x<address>`) instead of a call. The simplest way is to let `--scan-code` do
-everything from the trace:
+Reconstructed-code capabilities appear in the same timeline, with the triggering column naming the
+region (`code@0x<address>`) instead of a call. With a `.run` trace, `--scan-code` (shown above)
+extracts, matches, reconstructs and scans the regions, then replays once more so each code row sits
+at the moment it ran.
 
-```powershell
-python ttd-timeline.py <trace.run> -r <rules-dir> --scan-code
-```
-
-That runs all of it in one go -- extract, match, reconstruct the regions, static-scan them, and
-replay once more to find where each match executed -- so code rows arrive already placed at the
-moment they ran, interleaved with the API calls. Nothing needs to be passed in.
-
-The `--code` and `--code-hits` options are for the other direction: artifacts you already have, so
-a long trace need not be replayed again. `ttd-capa.py` writes them with `--code-output` and
-`--code-hits-output`:
+`--code` and `--code-hits` build the timeline from existing artifacts instead, so a long trace is
+not replayed again. `ttd-capa.py` writes them with `--code-output` and `--code-hits-output`:
 
 ```powershell
 # produce the three artifacts once
@@ -325,9 +314,9 @@ python ttd-timeline.py report.ttd.json -r <rules-dir> --code code-caps.json --co
 python ttd-timeline.py --code code-caps.json --code-hits hits.json
 ```
 
-`--code-hits` is optional. Without it a code capability sits at the position where its region was
-reconstructed rather than where it ran, which the footer of the listing calls out as
-`region-positioned`. See [docs/CODE-SCAN.md](docs/CODE-SCAN.md) for what the passes do.
+`--code-hits` is optional. Without it, a code capability sits where its region was reconstructed
+rather than where it ran, and the listing's footer marks it `region-positioned`. See
+[docs/CODE-SCAN.md](docs/CODE-SCAN.md) for what the passes do.
 
 # Embedding
 
@@ -358,9 +347,8 @@ formats.
 
 Supported:
 
-- x64 and x86 traces, including WoW64. Bitness is decided per call from the PE headers of the
-  module owning the call target, not once per trace, because a WoW64 process runs both widths at
-  once
+- x64 and x86 traces, including WoW64. Bitness is decided per call from the target module's PE
+  headers, because a WoW64 process runs both widths at once
 - exact argument decoding for the public Win32 SDK surface and the native API covered by phnt
 - `[Out]` parameters, counted `UNICODE_STRING` and `ANSI_STRING` descriptors, and enum and flag
   names
@@ -369,7 +357,8 @@ Supported:
 Not supported:
 
 - ARM and ARM64 traces
-- functions that are not directly exported by a loaded module
+- functions that are not exported by a loaded module. A call to an export is still recorded when it
+  reaches the export through a jump
 - COM interface methods
 - exact arguments for APIs with no metadata (`ntdll` internals, undocumented APIs, CRT helpers).
   These fall back to the heuristic capture described above and are marked `signature: false`

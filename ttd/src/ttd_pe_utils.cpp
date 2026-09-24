@@ -225,6 +225,40 @@ bool getModuleExports(TTD::Replay::UniqueCursor* cursor, TTD::GuestAddress modul
     return true;
 }
 
+bool getFunctionEnd(TTD::Replay::UniqueCursor* cursor, TTD::GuestAddress moduleBaseAddress, uint64_t entry, uint64_t& end) {
+    PeHeaders pe{};
+    if (!readNTHeaders(cursor, moduleBaseAddress, pe) || !pe.is64) {
+        return false;  // only PE32+ images carry a function table
+    }
+    const IMAGE_DATA_DIRECTORY& dir = pe.dataDir[IMAGE_DIRECTORY_ENTRY_EXCEPTION];
+    const uint64_t base = static_cast<uint64_t>(moduleBaseAddress);
+    if (dir.VirtualAddress == 0 || dir.Size < sizeof(IMAGE_RUNTIME_FUNCTION_ENTRY) || entry < base) {
+        return false;
+    }
+    const uint64_t rva = entry - base;
+
+    // The table is sorted by BeginAddress, so a binary search reads a dozen entries rather
+    // than the whole directory.
+    size_t lo = 0, hi = dir.Size / sizeof(IMAGE_RUNTIME_FUNCTION_ENTRY);
+    while (lo < hi) {
+        const size_t mid = lo + (hi - lo) / 2;
+        IMAGE_RUNTIME_FUNCTION_ENTRY rf{};
+        if (readMemory(cursor, moduleBaseAddress + dir.VirtualAddress + mid * sizeof(rf), &rf, sizeof(rf)) != sizeof(rf)) {
+            return false;
+        }
+        if (rf.BeginAddress == rva) {
+            end = base + rf.EndAddress;
+            return true;
+        }
+        if (rf.BeginAddress < rva) {
+            lo = mid + 1;
+        } else {
+            hi = mid;
+        }
+    }
+    return false;
+}
+
 bool getModuleImports(TTD::Replay::UniqueCursor* cursor, TTD::GuestAddress moduleBaseAddress, std::vector<ImportRecord>& out) {
     PeHeaders pe{};
 

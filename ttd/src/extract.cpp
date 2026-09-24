@@ -2,6 +2,7 @@
 
 #include "abi.hpp"
 #include "log.hpp"
+#include "ttd_pe_utils.hpp"
 #include "ttdutils.hpp"
 #include "win32meta.hpp"
 
@@ -30,6 +31,10 @@ namespace ttdcapa {
         // strings the entry could not read.
         struct InFlight {
             uint64_t ret_addr = 0;
+            // Where the return address sat at the export's entry. A return matches a call only
+            // at the same slot, and a return that matches a call deeper in the list proves
+            // every call above it was unwound (an exception, longjmp) and will never return.
+            uint64_t ret_slot = 0;
             size_t call_index = 0;
             GuestArch arch = GuestArch::X64;  // must match the entry pass to re-read correctly
             std::vector<PendingOut> pending;
@@ -42,6 +47,32 @@ namespace ttdcapa {
             // thread, with the same view, and ask again for the cost of a read.
             std::vector<uint16_t> unread_strings;
         };
+
+        // Whether the code at an export does nothing but return, at most setting a constant
+        // return value first: `ret`, `ret n`, `xor eax,eax; ret`, `mov eax,imm; ret` and the like.
+        //
+        // The linker folds functions with identical code into one copy, so a stub like this is
+        // usually shared with functions that are not exported (rpcrt4!RpcAsyncRegisterInfo is
+        // the same `xor eax,eax; ret` as the virtual method CALL::Cancel). A call through a
+        // function pointer that lands there might have meant any of them, and the export table
+        // only names one.
+        bool isReturnStub(uint8_t const* b, size_t n) {
+            size_t i = 0;
+            auto has = [&](size_t k) { return i + k <= n; };
+            if (has(1) && b[i] == 0x48) ++i;  // REX.W
+            if (has(2) && (b[i] == 0x33 || b[i] == 0x31 || b[i] == 0x32 || b[i] == 0x30) && b[i + 1] == 0xC0) {
+                i += 2;  // xor eax,eax / xor al,al
+            } else if (has(5) && b[i] == 0xB8) {
+                i += 5;  // mov eax,imm32
+            } else if (has(2) && b[i] == 0xB0) {
+                i += 2;  // mov al,imm8
+            } else if (has(3) && b[i] == 0x83 && b[i + 1] == 0xC8 && b[i + 2] == 0xFF) {
+                i += 3;  // or eax,-1
+            } else if (i != 0) {
+                return false;  // a REX prefix on anything else
+            }
+            return (has(1) && b[i] == 0xC3) || (has(3) && b[i] == 0xC2);
+        }
 
         // How many call/return events pass between cancellation checks. Calling into the
         // host's predicate on every event would show up in the sweep's cost on a trace with
@@ -280,6 +311,58 @@ namespace ttdcapa {
                    << " exported module functions across execution ("
                    << exports32 << " in 32-bit modules)\n";
 
+        // Thread plumbing, which is not a call the program made. Every thread enters its start
+        // routine by a call from kernel32!BaseThreadInitThunk (or, with no kernel32, from
+        // ntdll!RtlUserThreadStart), and that call reaches an export whenever the start
+        // address is one -- which a sample spoofing its thread starts arranges on purpose:
+        // wmplayer's threads all start at kernelbase!DebugActiveProcessStop. Recorded, each
+        // start looked like one API call enclosing everything the thread went on to do. So
+        // calls made from inside these two functions are not recorded, and neither is the
+        // call into BaseThreadInitThunk itself. The one exception is RtlExitUserThread, which
+        // they call once the start routine returns: the thread ending is an event of its own,
+        // and it encloses nothing.
+        std::vector<std::pair<uint64_t, uint64_t>> thread_start_code;  // [lo, hi)
+        std::vector<uint64_t> thread_start_entries;                   // BaseThreadInitThunk
+        {
+            TTD::Replay::ModuleLoadedEvent const* loads = engine->GetModuleLoadedEventList();
+            size_t const load_count = engine->GetModuleLoadedEventCount();
+            for (auto const& [va, resolved] : exports) {
+                bool const thunk = resolved.api == "BaseThreadInitThunk" && resolved.module == L"kernel32";
+                bool const start = resolved.api == "RtlUserThreadStart" && resolved.module == L"ntdll";
+                if (!thunk && !start) {
+                    continue;
+                }
+                if (thunk) {
+                    thread_start_entries.push_back(va);
+                }
+                // Without a function table (a 32-bit image) the call it makes lies within its
+                // first few dozen bytes on every build seen; the cap keeps the functions laid
+                // out after it from being swept in.
+                uint64_t end = va + 0x40;
+                for (size_t i = 0; i < load_count; ++i) {
+                    uint64_t const lo = static_cast<uint64_t>(loads[i].pModule->Address);
+                    if (va >= lo && va < lo + loads[i].pModule->Size) {
+                        inspection_cursor->SetPosition(loads[i].Position);
+                        getFunctionEnd(&inspection_cursor, loads[i].pModule->Address, va, end);
+                        break;
+                    }
+                }
+                thread_start_code.emplace_back(va, end);
+            }
+        }
+        auto from_thread_start = [&](uint64_t return_address) {
+            for (auto const& [lo, hi] : thread_start_code) {
+                if (return_address >= lo && return_address < hi) return true;
+            }
+            return false;
+        };
+
+        size_t via_jump = 0;       // calls whose target was not the export they reached
+        size_t thread_starts = 0;  // thread-start calls left out
+        size_t unwound = 0;        // recorded calls an exception or longjmp unwound past
+        size_t ambiguous = 0;      // calls through a pointer that landed on a return stub
+        std::unordered_map<uint64_t, bool> return_stub;  // export VA -> isReturnStub, on demand
+
         std::unordered_map<uint64_t, std::vector<InFlight>> in_flight;
         uint64_t seq = 0;
         uint64_t events_seen = 0;
@@ -289,26 +372,24 @@ namespace ttdcapa {
 
         TTD::Replay::UniqueCursor sweep{ engine->NewCursor() };
 
-        auto on_call_return = [&](TTD::GuestAddress target, TTD::GuestAddress fall_through,
-                                  TTD::Replay::IThreadView const* thread) noexcept {
-            bool const is_call = (static_cast<uint64_t>(fall_through) != 0);
-            uint64_t const utid = static_cast<uint64_t>(thread->GetThreadInfo().UniqueId);
-            ++events_seen;
-
-            if (config.cancelled && (events_seen % kCancelPollInterval) == 0 && config.cancelled()) {
-                cancelled = true;
-                sweep->InterruptReplay();
-                return;
-            }
-
-            if (is_call) {
-                auto it = exports.find(static_cast<uint64_t>(target));
-                if (it == exports.end()) {  // not a resolved API entry point
+        // Records one call, from the export entry it reached. `position` and `fall_through` are
+        // the call instruction's; `regs` are the thread's registers at the export's entry, so
+        // the arguments are read as the API receives them, whatever a thunk in between did.
+        // `ret_slot` is the stack pointer there, which points at the return address.
+        auto record_call = [&](std::unordered_map<uint64_t, ResolvedExport>::const_iterator it,
+                               uint64_t via, TTD::Replay::RegisterContext const& regs,
+                               TTD::Replay::Position const& position, uint64_t fall_through,
+                               uint64_t ret_slot, TTD::Replay::IThreadView const* thread,
+                               uint64_t utid) {
+                if (config.max_calls != 0 && out.process.calls.size() >= config.max_calls) {
+                    // Nothing more can be recorded, and the rest of the replay -- every export
+                    // entry still watched -- would cost as much as the part that was useful.
+                    limit_hit = true;
+                    sweep->InterruptReplay();
                     return;
                 }
-                if (config.max_calls != 0 && out.process.calls.size() >= config.max_calls) {
-                    limit_hit = true;
-                    return;
+                if (via != 0) {
+                    ++via_jump;
                 }
 
                 CallRecord rec;
@@ -316,9 +397,26 @@ namespace ttdcapa {
                 rec.seq = seq++;
                 rec.module = it->second.module;
                 rec.api = it->second.api;
-                rec.position = formatPosition(thread->GetPosition());
+                rec.via = via;
+                rec.position = formatPosition(position);
 
-                TTD::Replay::RegisterContext regs = thread->GetCrossPlatformContext();
+                // Only a call that reached the export by a jump can have meant another function
+                // folded onto the same code; a direct call names its target itself.
+                if (via != 0) {
+                    auto [stub, fresh] = return_stub.try_emplace(it->first, false);
+                    if (fresh) {
+                        uint8_t code[8] = {};
+                        size_t const got = thread->QueryMemoryBuffer(TTD::GuestAddress{ it->first },
+                                                                     TTD::BufferView{ code, sizeof(code) })
+                                               .Memory.Size;
+                        stub->second = isReturnStub(code, got);
+                    }
+                    if (stub->second) {
+                        rec.ambiguous = true;
+                        ++ambiguous;
+                    }
+                }
+
                 auto const* ctx = reinterpret_cast<AMD64_CONTEXT const*>(&regs);
 
                 // The target module's PE header decided this; in a WoW64 trace the
@@ -401,16 +499,88 @@ namespace ttdcapa {
                 }
 
                 size_t const idx = out.process.calls.size();
-                in_flight[utid].push_back(InFlight{ static_cast<uint64_t>(fall_through), idx,
-                                                   frame.arch, std::move(pending),
-                                                   std::move(unread_strings) });
+                in_flight[utid].push_back(InFlight{ fall_through, ret_slot, idx, frame.arch,
+                                                    std::move(pending), std::move(unread_strings) });
                 out.process.calls.push_back(std::move(rec));
+        };
+
+        // What an API call is, and why it is not decided at the call instruction.
+        //
+        // A call used to be recorded when the `call` landed on an export's entry. Every route
+        // into an API that ends in a jump was invisible to that: a sample's own stubs (one
+        // wmplayer sample redirected ntdll's export table to thunks it wrote just past the
+        // image), a return-address-spoofing gadget, and Windows' own Control Flow Guard
+        // dispatcher, through which CFG-compiled code calls any function pointer -- so the gap
+        // was on every trace, not only a hostile one. Special-casing each route is a treadmill.
+        //
+        // Instead, every export entry carries an execute watchpoint, and a call is *the first
+        // export entry a thread reaches after a `call`, before that thread's next call or
+        // return, with that call's return address on top of the stack*. However the caller
+        // got there, the API's first instruction runs; the return-address check is what keeps
+        // out entries that are not calls: the same sample *jumps* to a gadget that starts at
+        // kernelbase!DebugActiveProcess 23,276 times, a wrapper tail-jumps into a second export
+        // (fwbase!FwAlloc into firewallapi!FwAlloc), and some exports are labels in the middle
+        // of another function. On wmplayer this agrees exactly with WinDbg's TTD.Calls for every
+        // function checked.
+        struct ArmedCall {
+            TTD::Replay::Position position{};
+            uint64_t fall_through = 0;
+            uint64_t target = 0;
+        };
+        std::unordered_map<uint64_t, ArmedCall> armed;  // per thread, at most one
+
+        auto on_call_return = [&](TTD::GuestAddress target, TTD::GuestAddress fall_through,
+                                  TTD::Replay::IThreadView const* thread) noexcept {
+            bool const is_call = (static_cast<uint64_t>(fall_through) != 0);
+            uint64_t const utid = static_cast<uint64_t>(thread->GetThreadInfo().UniqueId);
+            ++events_seen;
+
+            if (config.cancelled && (events_seen % kCancelPollInterval) == 0 && config.cancelled()) {
+                cancelled = true;
+                sweep->InterruptReplay();
+                return;
+            }
+
+            // Any call or return ends the window in which an export entry can belong to the
+            // previous call; a call opens the next one.
+            if (is_call) {
+                armed[utid] = ArmedCall{ thread->GetPosition(), static_cast<uint64_t>(fall_through),
+                                         static_cast<uint64_t>(target) };
             } else {
+                armed.erase(utid);
                 // Log the most recent call on this thread as returned, capturing its return value.
                 auto it = in_flight.find(utid);
                 if (it != in_flight.end() && !it->second.empty()) {
-                    InFlight& top = it->second.back();
-                    if (top.ret_addr == static_cast<uint64_t>(target)) {
+                    // Which slot the return address is being popped from. The callback can
+                    // stand before the `ret` or after it; after it, the program counter is
+                    // already the return address and the slot is one word below the stack.
+                    uint64_t const pc = static_cast<uint64_t>(thread->GetProgramCounter());
+                    uint64_t const sp = static_cast<uint64_t>(thread->GetStackPointer());
+                    auto slot_for = [&](InFlight const& f) {
+                        return pc == static_cast<uint64_t>(target)
+                            ? sp - (f.arch == GuestArch::X64 ? 8 : 4) : sp;
+                    };
+                    auto matches = [&](InFlight const& f) {
+                        return f.ret_addr == static_cast<uint64_t>(target) && f.ret_slot == slot_for(f);
+                    };
+                    std::vector<InFlight>& stack = it->second;
+                    if (!matches(stack.back()) && stack.back().ret_slot < slot_for(stack.back())) {
+                        // The top call's frame lies below this return's: if a call further
+                        // down is the one returning, everything above it was unwound. Search
+                        // only then -- a return from an unrecorded function, the common case,
+                        // costs one comparison. Matching a specific call rather than popping
+                        // every frame below the stack pointer keeps a switch to another stack
+                        // (a fiber) from discarding calls that are still running.
+                        for (size_t k = stack.size() - 1; k-- > 0;) {
+                            if (matches(stack[k])) {
+                                unwound += stack.size() - 1 - k;
+                                stack.resize(k + 1);
+                                break;
+                            }
+                        }
+                    }
+                    InFlight& top = stack.back();
+                    if (matches(top)) {
                         CallRecord& call = out.process.calls[top.call_index];
                         call.ret = thread->GetBasicReturnValue();
                         call.has_ret = true;
@@ -461,6 +631,67 @@ namespace ttdcapa {
             }
         };
 
+        auto on_entry = [&](TTD::Replay::ICursorView::MemoryWatchpointResult const& watchpoint,
+                            TTD::Replay::IThreadView const* thread) noexcept -> bool {
+            if (watchpoint.AccessType != TTD::Replay::DataAccessType::Execute) {
+                return false;
+            }
+            uint64_t const utid = static_cast<uint64_t>(thread->GetThreadInfo().UniqueId);
+            auto const call = armed.find(utid);
+            if (call == armed.end()) {
+                return false;  // reached by a jump, not a call
+            }
+            uint64_t const va = static_cast<uint64_t>(watchpoint.Address);
+            auto const it = exports.find(va);
+            if (it == exports.end()) {
+                return false;
+            }
+            TTD::Replay::RegisterContext const regs = thread->GetCrossPlatformContext();
+            uint64_t sp = 0;
+            size_t width = 0;
+            if (it->second.is64) {
+                sp = reinterpret_cast<AMD64_CONTEXT const*>(&regs)->Rsp;
+                width = 8;
+            } else {
+                sp = reinterpret_cast<X86_NT5_CONTEXT const*>(&regs)->Esp;
+                width = 4;
+            }
+            uint64_t ret = 0;
+            if (thread->QueryMemoryBuffer(TTD::GuestAddress{ sp }, TTD::BufferView{ &ret, width })
+                    .Memory.Size != width
+                || ret != call->second.fall_through) {
+                return false;  // the stack moved since the call: not the called function's entry
+            }
+            ArmedCall const armedCall = call->second;
+            armed.erase(call);
+            if ((from_thread_start(armedCall.fall_through) && it->second.api != "RtlExitUserThread")
+                || std::find(thread_start_entries.begin(), thread_start_entries.end(), va)
+                       != thread_start_entries.end()) {
+                ++thread_starts;
+                return false;
+            }
+            record_call(it, armedCall.target != va ? armedCall.target : 0, regs,
+                        armedCall.position, armedCall.fall_through, sp, thread, utid);
+            return false;  // observe only
+        };
+
+        size_t watched = 0;
+        for (auto const& entry : exports) {
+            if (sweep->AddMemoryWatchpoint(TTD::Replay::MemoryWatchpointData{
+                    .Address = TTD::GuestAddress{ entry.first },
+                    .Size = 1,
+                    .AccessMask = TTD::Replay::DataAccessMask::Execute,
+                })) {
+                ++watched;
+            }
+        }
+        if (watched != exports.size()) {
+            // Silent loss here would read exactly like a quiet trace, so say it.
+            log::err() << "[!] The engine accepted " << watched << " of " << exports.size()
+                       << " export entry watchpoints; calls to the rest are not recorded\n";
+        }
+        sweep->SetMemoryWatchpointCallback(on_entry);
+        sweep->SetEventMask(TTD::Replay::EventMask::MemoryWatchpoint);
         sweep->SetCallReturnCallback(on_call_return);
         // Without ReplayAllSegmentsWithoutFiltering the engine only replays segments it
         // thinks can hit an event, and a call/return callback alone doesn't qualify --
@@ -480,6 +711,20 @@ namespace ttdcapa {
         }
         log::err() << "[+] Recorded " << out.process.calls.size() << " API calls from "
                    << events_seen << " call/return events\n";
+        if (via_jump != 0) {
+            // Calls the old call-site matching could not see: the call landed on a thunk, a
+            // dispatcher or a gadget, and the export was reached by a jump from there.
+            log::err() << "[+] " << via_jump
+                       << " of those reached the export by a jump from where the call landed\n";
+        }
+        log::err() << "[+] " << thread_starts << " thread start(s) left out\n";
+        if (ambiguous != 0) {
+            log::err() << "[+] " << ambiguous
+                       << " call(s) landed on a return stub other functions may share; marked ambiguous\n";
+        }
+        if (unwound != 0) {
+            log::err() << "[+] " << unwound << " call(s) were unwound and never returned\n";
+        }
         if (strings_at_return != 0) {
             // The larger half of the string recovery, and free: read at each call's return,
             // inside the sweep, with no seek to pay for. Worth its own line -- the seeking

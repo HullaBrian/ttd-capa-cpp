@@ -208,6 +208,13 @@ namespace ttdcapa {
             if (!callRecord.return_position.empty()) {
                 call["returnPosition"] = callRecord.return_position;
             }
+            // Only when the call went through a thunk, so a report without any is unchanged.
+            if (callRecord.via != 0) {
+                call["via"] = callRecord.via;
+            }
+            if (callRecord.ambiguous) {
+                call["ambiguous"] = true;
+            }
 
             // Proper UTF-8, not a wchar_t-per-byte truncation: module names are ASCII in
             // practice, but a non-ASCII one would otherwise be mangled rather than encoded.
